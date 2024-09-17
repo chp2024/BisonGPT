@@ -59,6 +59,7 @@ async def query_message(query, model, token_budget):
 
     # Query Pinecone for the most relevant texts
     strings, relatedness = await query_pinecone(query_embedding)
+    print(strings)
 
     # Construct the message with the most relevant texts
     introduction = 'Use the below information about Howard University to answer the subsequent question. If the answer could not be found in the information then write "I could not find an answer."'
@@ -95,13 +96,8 @@ async def ask(query, model=SETTINGS["gpt-model"], token_budget=4096 - 250):
     return response_content
 
 
-conversation_history = []
-
-
 @cl.on_chat_start
 async def on_chat_start():
-    global conversation_history
-    conversation_history = []
     await cl.Message(
         content="Hello, welcome to BisonGPT! How can I help you today?"
     ).send()
@@ -109,6 +105,5 @@ async def on_chat_start():
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    global conversation_history
     response = await ask(message.content)
     await cl.Message(content=response).send()

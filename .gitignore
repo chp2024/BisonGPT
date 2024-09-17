@@ -3,3 +3,4 @@ venv/
 .files
 Data/*.csv
 __pycache__/
+*.txt
