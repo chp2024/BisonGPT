@@ -12,7 +12,6 @@ client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 cl.instrument_openai()
 
 # Pinecone initialization
-# Pinecone API Key: 14e14fb4-84dd-40ef-942d-89576fdff7d8
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 INDEX_NAME = "bisongpt-index"
 index = pc.Index(INDEX_NAME)
@@ -24,7 +23,16 @@ SETTINGS = {
     "namespace": "howard-catalogue",
 }
 
+UNANSWERED_LOG_FILE = "unanswered_questions.txt"
 
+
+# Function to log unanswered questions
+def log_unanswered_question(query):
+    with open(UNANSWERED_LOG_FILE, "a") as log_file:
+        log_file.write(f"{query}\n")
+
+
+# Function to query Pinecone for the most relevant vectors
 async def query_pinecone(query_embedding, top_n=10):
     response = index.query(
         vector=query_embedding,
@@ -41,6 +49,7 @@ async def query_pinecone(query_embedding, top_n=10):
     return strings, relatedness_scores
 
 
+# Function to generate the query message
 async def query_message(query, model, token_budget):
     # Get the query embedding from OpenAI API
     query_embedding_response = await client.embeddings.create(
@@ -50,10 +59,9 @@ async def query_message(query, model, token_budget):
 
     # Query Pinecone for the most relevant texts
     strings, relatedness = await query_pinecone(query_embedding)
-    print(strings)
 
     # Construct the message with the most relevant texts
-    introduction = 'Use the below segments about Howard University to answer the subsequent question. If the answer could not be found in the segments then write "I could not find an answer."'
+    introduction = 'Use the below information about Howard University to answer the subsequent question. If the answer could not be found in the information then write "I could not find an answer."'
     question = f"\n\nQuestion: {query}"
 
     message = introduction
@@ -78,7 +86,13 @@ async def ask(query, model=SETTINGS["gpt-model"], token_budget=4096 - 250):
     response = await client.chat.completions.create(
         model=model, messages=messages, temperature=SETTINGS["temperature"]
     )
-    return response.choices[0].message.content
+    response_content = response.choices[0].message.content
+
+    # Check if the response contains "I could not find an answer"
+    if "I could not find an answer" in response_content:
+        log_unanswered_question(query)
+
+    return response_content
 
 
 conversation_history = []
