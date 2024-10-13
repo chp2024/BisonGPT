@@ -106,8 +106,10 @@ async def main():
     texts, ids = zip(*all_text_chunks)
 
     # Create batches of text chunks
-    text_batches = [texts[i : i + BATCH_SIZE] for i in range(0, len(texts), BATCH_SIZE)]
-    id_batches = [ids[i : i + BATCH_SIZE] for i in range(0, len(ids), BATCH_SIZE)]
+    text_batches = [texts[i: i + BATCH_SIZE]
+                    for i in range(0, len(texts), BATCH_SIZE)]
+    id_batches = [ids[i: i + BATCH_SIZE]
+                  for i in range(0, len(ids), BATCH_SIZE)]
 
     # Process each batch asynchronously
     for text_batch, id_batch in zip(text_batches, id_batches):
@@ -126,7 +128,8 @@ async def main():
         index.upsert(vectors=vectors, namespace="howard-catalogue")
 
         print(
-            f"Batch {text_batches.index(text_batch) + 1} of {len(text_batches)} batches processed"
+            f"Batch {text_batches.index(
+                text_batch) + 1} of {len(text_batches)} batches processed"
         )
 
     print("All embeddings saved to Pinecone")
