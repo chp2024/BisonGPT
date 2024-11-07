@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { sessionState, useChatSession } from "@chainlit/react-client";
 import { Playground } from "./components/playground";
 import { useRecoilValue } from "recoil";
+import "./index.css";
 
 const userEnv = {};
 

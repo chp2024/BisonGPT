@@ -1,29 +1,36 @@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { v4 as uuidv4 } from "uuid";
-
+import { useState, useEffect, useRef } from "react";
 import {
   useChatInteract,
   useChatMessages,
   IStep,
 } from "@chainlit/react-client";
-import { useState } from "react";
+
+// Avatar image URLs (or local assets)
+import userAvatar from "../assets/user_avatar.jpg";
+import botAvatar from "../assets/Howard_Bison_logo.png"; // Bot's avatar image
 
 export function Playground() {
   const [inputValue, setInputValue] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const [showIntro, setShowIntro] = useState(true); // State to control visibility of bio and recommendations
   const { sendMessage } = useChatInteract();
   const { messages } = useChatMessages();
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const handleSendMessage = () => {
     const content = inputValue.trim();
     if (content) {
       const message = {
         name: "user",
-        type: "user_message" as const,
+        type: "user_message" as const, // User-initiated message
         output: content,
       };
       sendMessage(message, []);
       setInputValue("");
+      setIsTyping(true);
+      setShowIntro(false); // Hide bio and recommendations after the first user message
     }
   };
 
@@ -36,29 +43,145 @@ export function Playground() {
       undefined,
       dateOptions
     );
+    const isUserMessage = message.name === "user";
+    const isSystemMessage = message.name === "system"; // Assuming system messages have a 'system' type
+
     return (
-      <div key={message.id} className="flex items-start space-x-2">
-        <div className="w-20 text-sm text-green-500">{message.name}</div>
-        <div className="flex-1 border rounded-lg p-2">
-          <p className="text-black dark:text-white">{message.output}</p>
-          <small className="text-xs text-gray-500">{date}</small>
+      <div
+        key={message.id}
+        className={`flex items-start mb-4 ${
+          isUserMessage ? "justify-end" : "justify-start"
+        }`}
+      >
+        {/* Avatar */}
+        {!isUserMessage && !isSystemMessage && (
+          <img
+            src={botAvatar}
+            alt="Bot Avatar"
+            className="w-10 h-10 rounded-full mr-3"
+          />
+        )}
+
+        <div
+          className={`max-w-xs md:max-w-md p-4 rounded-2xl shadow-md ${
+            isUserMessage
+              ? "bg-blue-600 text-white rounded-br-none"
+              : "bg-gray-200 text-black rounded-bl-none dark:bg-gray-700 dark:text-white"
+          }`}
+        >
+          <p className="text-sm">{message.output}</p>
+          <small className="text-xs text-gray-400 block mt-1">{date}</small>
         </div>
+
+        {/* Avatar on the right for the user */}
+        {isUserMessage && (
+          <img
+            src={userAvatar}
+            alt="User Avatar"
+            className="w-10 h-10 rounded-full ml-3"
+          />
+        )}
       </div>
     );
   };
 
+  // Handle typing state based on new messages
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+
+      // Skip system messages from affecting intro visibility
+      if (lastMessage.name !== "user" && lastMessage.name !== "system") {
+        setIsTyping(false); // Stop typing indicator when bot responds
+      }
+    }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]); // Listen for changes in messages array
+
+  // Scroll to the bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Predefined recommendations (tabs)
+  const recommendations = [
+    "Where can I get food?",
+    "When is spring 2024 class registration?",
+    "How many credits do I need to graduate?",
+  ];
+
+  // Handle sending predefined messages
+  const handleRecommendationClick = (text: string) => {
+    const message = {
+      name: "user",
+      type: "user_message" as const,
+      output: text,
+    };
+    sendMessage(message, []);
+    setIsTyping(true);
+    setShowIntro(false); // Hide bio and recommendations when a tab is clicked
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex flex-col">
-      <div className="flex-1 overflow-auto p-6">
+      {/* Bot Bio Section */}
+      {showIntro && (
+        <div className="flex flex-col items-center mt-10 mb-6">
+          {/* Bot Avatar */}
+          <img
+            src={botAvatar}
+            alt="Bot Avatar"
+            className="w-16 h-16 rounded-full mb-2 shadow-lg"
+          />
+          {/* Bot Bio */}
+          <p className="text-gray-700 dark:text-gray-300 text-center px-4">
+            Welcome to BisonGPT, I'm here to assist you with all your Howard University related queries!
+          </p>
+        </div>
+      )}
+
+      {/* Messages Container */}
+      <div className="flex-1 overflow-auto p-4 md:p-6 relative">
+        {/* Recommendation Tabs - centered */}
+        {showIntro && messages.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-wrap gap-4">
+              {recommendations.map((rec, index) => (
+                <Button
+                  key={index}
+                  onClick={() => handleRecommendationClick(rec)}
+                  className="bg-gray-200 text-black dark:bg-gray-700 dark:text-white px-4 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 shadow-md"
+                >
+                  {rec}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-4">
+          {/* Render Messages */}
           {messages.map((message) => renderMessage(message))}
+
+          {/* Typing Indicator */}
+          {isTyping && (
+            <div className="flex justify-start mb-4">
+              <div className="bg-gray-200 dark:bg-gray-700 text-black dark:text-white p-4 rounded-2xl max-w-xs md:max-w-md">
+                <p className="text-sm italic">Bot is typing...</p>
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
         </div>
       </div>
-      <div className="border-t p-4 bg-white dark:bg-gray-800">
+
+      {/* Input Field */}
+      <div className="border-t border-gray-300 dark:border-gray-700 p-4 bg-white dark:bg-gray-800 sticky bottom-0">
         <div className="flex items-center space-x-2">
           <Input
             autoFocus
-            className="flex-1"
+            className="flex-1 rounded-full bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             id="message-input"
             placeholder="Type a message"
             value={inputValue}
@@ -69,7 +192,11 @@ export function Playground() {
               }
             }}
           />
-          <Button onClick={handleSendMessage} type="submit">
+          <Button
+            onClick={handleSendMessage}
+            type="submit"
+            className="bg-blue-600 text-white rounded-full hover:bg-blue-700"
+          >
             Send
           </Button>
         </div>
