@@ -1,6 +1,6 @@
 venv/
 */.env
 .files
-Data/
+/Data/
 .chainlit/
 __pycache__/

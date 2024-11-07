@@ -1,3 +1,4 @@
+#This file is deprecated, I'm only keeping it around because I don't want to delete any dependencies
 import csv
 import pdfplumber
 import re
