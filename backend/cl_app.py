@@ -1,34 +1,24 @@
-from assistant import BisonGPTAssistant
 import chainlit as cl
 from chainlit.config import config
 from openai import AsyncOpenAI, AsyncAssistantEventHandler, OpenAI
-from openai.types.beta.threads.runs import RunStep
-from datetime import datetime
+from urllib.parse import quote
 
 # Initialize OpenAI clients
 client = OpenAI()
 async_client = AsyncOpenAI()
 
 # Retrieve assistant details
-assistant = client.beta.assistants.retrieve(assistant_id="asst_CaLmP9XKfyDymTvAANcBt4AR")
+assistant = client.beta.assistants.retrieve(assistant_id="asst_Vbc5MTpjfgDKMRNifcrtU7Kq")
 config.ui.name = assistant.name
 
-# Utility function for current UTC time
-def utc_now():
-    return datetime.now().isoformat()
-
 class EventHandler(AsyncAssistantEventHandler):
-    def __init__(self, assistant_name) -> None:
+    def __init__(self, assistant_name: str) -> None:
         super().__init__()
-        self.current_message = None
-        self.current_step = None
-        self.current_tool_call = None
+        self.current_message: cl.Message = None
+        self.current_step: cl.Step = None
         self.assistant_name = assistant_name
 
-    async def on_run_step_created(self, run_step: RunStep) -> None:
-        cl.user_session.set("run_step", run_step)
-
-    async def on_text_created(self, text):
+    async def on_text_created(self, text) -> None:
         self.current_message = await cl.Message(author=self.assistant_name, content="").send()
 
     async def on_text_delta(self, delta, snapshot):
@@ -38,51 +28,61 @@ class EventHandler(AsyncAssistantEventHandler):
     async def on_text_done(self, text):
         await self.current_message.update()
 
-    async def on_tool_call_created(self, tool_call):
-        self.current_tool_call = tool_call.id
-        self.current_step = cl.Step(
-            name=tool_call.type,
-            type="tool",
-            parent_id=cl.context.current_run.id,
-        )
-        self.current_step.show_input = "python"
-        await self.current_step.send()
+        if text.annotations:
+            citations = []
+            for index, annotation in enumerate(text.annotations):
+                if annotation.type == "file_citation":
+                    if annotation.text in self.current_message.content:
+                        self.current_message.content = self.current_message.content.replace(annotation.text, f"[{index + 1}]")
 
-    async def on_tool_call_delta(self, delta, snapshot): 
-        if snapshot.id != self.current_tool_call:
-            self.current_tool_call = snapshot.id
-            self.current_step = cl.Step(name=delta.type, type="tool", parent_id=cl.context.current_run.id)
-            self.current_step.start = utc_now()
-            if snapshot.type == "code_interpreter":
-                self.current_step.show_input = "python"
-            if snapshot.type == "function":
-                self.current_step.name = snapshot.function.name
-                self.current_step.language = "json"
-            await self.current_step.send()
+                    if file_citation := getattr(annotation, "file_citation", None):
+                        cited_file = await async_client.files.retrieve(file_citation.file_id)
+                        citations.append(f"[{index + 1}]: {cited_file.filename}")
 
-        if delta.type == "code_interpreter" and delta.code_interpreter.outputs:
-            for output in delta.code_interpreter.outputs:
-                if output.type == "logs":
-                    self.current_step.output += output.logs
-                    self.current_step.language = "markdown"
-                    self.current_step.end = utc_now()
-                    await self.current_step.update()
-                elif output.type == "image":
-                    self.current_step.language = "json"
-                    self.current_step.output = output.image.model_dump_json()
-        elif delta.code_interpreter.input:
-            await self.current_step.stream_token(delta.code_interpreter.input, is_input=True)
+            if citations:
+                self.current_message.content += "\nCitations:\n" + "\n".join(citations)
+                await self.current_message.update()
 
     async def on_event(self, event) -> None:
+        if event.event == "thread.run.requires_action":
+            run_id = event.data.id
+            await self.handle_requires_action(event.data, run_id)
         if event.event == "error":
             await cl.ErrorMessage(content=str(event.data.message)).send()
+
+    async def handle_requires_action(self, data, run_id):
+        tool_outputs = []
+        for tool_call in data.required_action.submit_tool_outputs.tool_calls:
+            if tool_call.function.name == "convert_address":
+                address = tool_call.function.parameters["address"]
+                google_maps_link = await self.convert_address(address)
+                tool_outputs.append({
+                    "function_name": "convert_address",
+                    "result": google_maps_link
+                })
+
+        await self.submit_tool_outputs(tool_outputs, run_id)
+
+    async def submit_tool_outputs(self, tool_outputs, run_id):
+        thread_id = cl.user_session.get("thread_id")
+        async with async_client.beta.threads.runs.submit_tool_outputs_stream(
+            thread_id=thread_id,
+            run_id=run_id,
+            tool_outputs=tool_outputs,
+            event_handler=self,
+        ) as stream:
+            await stream.until_done()
+
 
     async def on_exception(self, exception: Exception) -> None:
         await cl.ErrorMessage(content=str(exception)).send()
 
-    async def on_tool_call_done(self, tool_call):       
-        self.current_step.end = utc_now()
-        await self.current_step.update()
+    async def convert_address(self, address: str) -> str:
+        from urllib.parse import quote
+
+        base_url = "https://www.google.com/maps/search/?api=1&query="
+        encoded_address = quote(address)
+        return f"{base_url}{encoded_address}"
 
 @cl.on_chat_start
 async def start_chat():
@@ -108,26 +108,16 @@ async def main(message: cl.Message):
     thread_id = cl.user_session.get("thread_id")
 
     # Add a Message to the Thread
-    new_message = client.beta.threads.messages.create(
+    new_message = await async_client.beta.threads.messages.create(
         thread_id=thread_id,
         role="user",
         content=message.content
     )
 
-    run = client.beta.threads.runs.create_and_poll(
+    # Create and Stream a Run
+    async with async_client.beta.threads.runs.stream(
         thread_id=thread_id,
         assistant_id=assistant.id,
-    )
-
-    m = list(client.beta.threads.messages.list(thread_id=thread_id, run_id=run.id))
-
-    message_content = m[0].content[0].text
-    await cl.Message(content=message_content.value).send()
-
-    # Create and Stream a Run
-    # async with async_client.beta.threads.runs.stream(
-    #     thread_id=thread_id,
-    #     assistant_id=assistant.id,
-    #     event_handler=EventHandler(assistant_name=assistant.name),
-    # ) as stream:
-    #     await stream.until_done()
+        event_handler=EventHandler(assistant_name=assistant.name),
+    ) as stream:
+        await stream.until_done()
