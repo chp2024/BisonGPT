@@ -6,6 +6,7 @@ import {
   useChatMessages,
   IStep,
 } from "@chainlit/react-client";
+import axios from "axios";
 
 // Avatar image URLs (or local assets)
 import userAvatar from "../assets/user_avatar.jpg";
@@ -18,19 +19,68 @@ export function Playground() {
   const { sendMessage } = useChatInteract();
   const { messages } = useChatMessages();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const content = inputValue.trim();
-    if (content) {
-      const message = {
-        name: "user",
-        type: "user_message" as const, // User-initiated message
-        output: content,
-      };
-      sendMessage(message, []);
+    if (!content && !selectedFile) return;
+  
+    const formData = new FormData();
+    formData.append("message", content);
+    if (selectedFile) formData.append("file", selectedFile);
+  
+    try {
+      const response = await axios.post("/api/upload-message", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+  
+      // Extract response data
+      const { message, file, response: botResponse } = response.data;
+  
+      // Show user message
+      if (message) {
+        sendMessage(
+          { name: "user", type: "user_message", output: message },
+          []
+        );
+      }
+  
+      // Show bot response
+      sendMessage(
+        {
+          name: "bot",
+          type: "assistant_message",
+          output: botResponse,
+        },
+        []
+      );
+  
+      // Show feedback for uploaded file
+      if (file) {
+        sendMessage(
+          {
+            name: "bot",
+            type: "assistant_message",
+            output: `File "${file.filename}" processed successfully.`,
+          },
+          []
+        );
+      }
+    } catch (error) {
+      console.error("Error:", error);
+      sendMessage(
+        {
+          name: "bot",
+          type: "assistant_message",
+          output: "An error occurred while processing your request.",
+        },
+        []
+      );
+    } finally {
       setInputValue("");
+      setSelectedFile(null);
       setIsTyping(true);
-      setShowIntro(false); // Hide bio and recommendations after the first user message
+      setShowIntro(false);
     }
   };
 
@@ -165,20 +215,35 @@ export function Playground() {
 
           {/* Typing Indicator */}
           {isTyping && (
-            <div className="flex justify-start mb-4">
-              <div className="bg-gray-200 dark:bg-gray-700 text-black dark:text-white p-4 rounded-2xl max-w-xs md:max-w-md">
-                <p className="text-sm italic">Bot is typing...</p>
-              </div>
+          <div className="flex justify-start mb-4">
+            <div className="bg-gray-200 dark:bg-gray-700 text-black dark:text-white p-4 rounded-2xl max-w-xs md:max-w-md">
+              <p className="text-sm italic">Processing file...</p>
             </div>
-          )}
+          </div>
+        )}
 
           <div ref={messagesEndRef} />
         </div>
       </div>
 
-      {/* Input Field */}
+      {/* Input and File Upload Section */}
       <div className="border-t border-gray-300 dark:border-gray-700 p-4 bg-white dark:bg-gray-800 sticky bottom-0">
         <div className="flex items-center space-x-2">
+          {/* File Upload */}
+          <input
+            type="file"
+            id="file-upload"
+            className="hidden"
+            onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+          />
+          <label
+            htmlFor="file-upload"
+            className="cursor-pointer bg-gray-200 text-black dark:bg-gray-700 dark:text-white px-4 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 shadow-md"
+          >
+            Attach File
+          </label>
+  
+          {/* Message Input */}
           <Input
             autoFocus
             className="flex-1 rounded-full bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -192,6 +257,8 @@ export function Playground() {
               }
             }}
           />
+  
+          {/* Send Button */}
           <Button
             onClick={handleSendMessage}
             type="submit"
@@ -200,7 +267,15 @@ export function Playground() {
             Send
           </Button>
         </div>
+  
+        {/* Show Selected File Name */}
+        {selectedFile && (
+          <p className="text-sm text-gray-500 mt-2">
+            Selected file: {selectedFile.name}
+          </p>
+        )}
       </div>
     </div>
+
   );
 }

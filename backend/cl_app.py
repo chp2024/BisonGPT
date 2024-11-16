@@ -83,25 +83,35 @@ async def on_chat_start():
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    message_history = cl.user_session.get("message_history")
+    message_history = cl.user_session.get("message_history", [])
+    uploaded_file_content = cl.user_session.get("uploaded_file_content", "")
+
+    # Combine the user message with the uploaded file content if available
+    combined_message = message.content
+    if uploaded_file_content:
+        combined_message += f"\n\nFile Content:\n{uploaded_file_content}"
 
     # Query Pinecone for related information
-    pinecone_response = await query_message(message.content, settings["model"], settings["max_tokens"])
+    pinecone_response = await query_message(combined_message, settings["model"], settings["max_tokens"])
 
-    # Update message history with the Pinecone response
-    message_history.append({"role": "user", "content": pinecone_response})
+    # Update message history with the user's message and Pinecone response
+    message_history.append({"role": "user", "content": message.content})
+    message_history.append({"role": "system", "content": pinecone_response})
 
+    # Prepare a message object for streaming the assistant's response
     msg = cl.Message(content="")
     await msg.send()
 
-    # Send message history to OpenAI model with Pinecone-enhanced context
+    # Send the updated message history to OpenAI with Pinecone-enhanced context
     stream = await client.chat.completions.create(
         messages=message_history, stream=True, **settings
     )
 
+    # Stream the assistant's response token by token
     async for part in stream:
         if token := part.choices[0].delta.content or "":
             await msg.stream_token(token)
 
+    # Finalize and store the assistant's response in the message history
     message_history.append({"role": "assistant", "content": msg.content})
     await msg.update()
