@@ -8,7 +8,7 @@ client = OpenAI()
 async_client = AsyncOpenAI()
 
 # Retrieve assistant details
-assistant = client.beta.assistants.retrieve(assistant_id="asst_Vbc5MTpjfgDKMRNifcrtU7Kq")
+assistant = client.beta.assistants.retrieve(assistant_id="asst_TIwxYMA4iJar5MbFxOs9o3zy")
 config.ui.name = assistant.name
 
 class EventHandler(AsyncAssistantEventHandler):
@@ -51,14 +51,16 @@ class EventHandler(AsyncAssistantEventHandler):
             await cl.ErrorMessage(content=str(event.data.message)).send()
 
     async def handle_requires_action(self, data, run_id):
+        import json
         tool_outputs = []
         for tool_call in data.required_action.submit_tool_outputs.tool_calls:
-            if tool_call.function.name == "convert_address":
-                address = tool_call.function.parameters["address"]
-                google_maps_link = await self.convert_address(address)
+            if tool_call.function.name == "get_directions":
+                arguments = json.loads(tool_call.function.arguments)
+                address = arguments.get("address")
+                google_maps_link = await self.get_directions(address)
                 tool_outputs.append({
-                    "function_name": "convert_address",
-                    "result": google_maps_link
+                    "tool_call_id": tool_call.id,
+                    "output": f"Directions: {google_maps_link}"
                 })
 
         await self.submit_tool_outputs(tool_outputs, run_id)
@@ -69,7 +71,7 @@ class EventHandler(AsyncAssistantEventHandler):
             thread_id=thread_id,
             run_id=run_id,
             tool_outputs=tool_outputs,
-            event_handler=self,
+            event_handler=EventHandler(self.assistant_name),
         ) as stream:
             await stream.until_done()
 
@@ -77,12 +79,12 @@ class EventHandler(AsyncAssistantEventHandler):
     async def on_exception(self, exception: Exception) -> None:
         await cl.ErrorMessage(content=str(exception)).send()
 
-    async def convert_address(self, address: str) -> str:
+    async def get_directions(self, address: str) -> str:
         from urllib.parse import quote
 
-        base_url = "https://www.google.com/maps/search/?api=1&query="
+        base_url = "https://www.google.com/maps/dir/?api=1"
         encoded_address = quote(address)
-        return f"{base_url}{encoded_address}"
+        return f"{base_url}&origin=current+location&destination={encoded_address}"
 
 @cl.on_chat_start
 async def start_chat():
