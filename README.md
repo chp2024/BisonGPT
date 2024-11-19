@@ -1,6 +1,6 @@
 # Project Title
 
-BisonGP. A general chatbox for all your Howard related queries.
+BisonGPT. A general chatbox for all your Howard related queries.
 
 ## Description
 

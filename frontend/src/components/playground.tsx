@@ -5,7 +5,9 @@ import {
   useChatInteract,
   useChatMessages,
   IStep,
+  IFileRef,
 } from "@chainlit/react-client";
+import ReactMarkdown from "react-markdown";
 
 // Avatar image URLs (or local assets)
 import userAvatar from "../assets/user_avatar.jpg";
@@ -15,22 +17,62 @@ export function Playground() {
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [showIntro, setShowIntro] = useState(true); // State to control visibility of bio and recommendations
-  const { sendMessage } = useChatInteract();
+  const { sendMessage, uploadFile } = useChatInteract();
   const { messages } = useChatMessages();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const content = inputValue.trim();
-    if (content) {
-      const message = {
-        name: "user",
-        type: "user_message" as const, // User-initiated message
-        output: content,
-      };
-      sendMessage(message, []);
+    if (!content && !selectedFile) return;
+
+    try {
+      // Initialize an array for file references
+      const file_refs: IFileRef[] = [];
+
+      if (selectedFile) {
+        const onProgress = (progress: number) => {
+          console.log(`Upload progress: ${progress}%`);
+        };
+
+        const { promise } = uploadFile(selectedFile, onProgress);
+        const fileData = await promise; // Wait for the upload to complete
+
+        file_refs.push({ id: fileData.id });
+
+        sendMessage({
+          name: "bot",
+          type: "assistant_message",
+          output: `File uploaded successfully: ${selectedFile.name}`,
+        });
+      }
+
+      if (content) {
+        // Send text message along with file references
+        sendMessage(
+          {
+            name: "user",
+            type: "user_message",
+            output: content,
+          },
+          file_refs
+        );
+      }
+    } catch (error) {
+      console.error("Error uploading file or sending message:", error);
+      sendMessage(
+        {
+          name: "bot",
+          type: "assistant_message",
+          output: "An error occurred while processing your request.",
+        },
+        []
+      );
+    } finally {
       setInputValue("");
+      setSelectedFile(null);
       setIsTyping(true);
-      setShowIntro(false); // Hide bio and recommendations after the first user message
+      setShowIntro(false);
     }
   };
 
@@ -44,7 +86,7 @@ export function Playground() {
       dateOptions
     );
     const isUserMessage = message.name === "user";
-    const isSystemMessage = message.name === "system"; // Assuming system messages have a 'system' type
+    const isSystemMessage = message.name === "system";
 
     return (
       <div
@@ -69,7 +111,9 @@ export function Playground() {
               : "bg-gray-200 text-black rounded-bl-none dark:bg-gray-700 dark:text-white"
           }`}
         >
-          <p className="text-sm">{message.output}</p>
+          <ReactMarkdown className="text-sm whitespace-pre-wrap">
+            {message.output}
+          </ReactMarkdown>
           <small className="text-xs text-gray-400 block mt-1">{date}</small>
         </div>
 
@@ -135,7 +179,8 @@ export function Playground() {
           />
           {/* Bot Bio */}
           <p className="text-gray-700 dark:text-gray-300 text-center px-4">
-            Welcome to BisonGPT, I'm here to assist you with all your Howard University related queries!
+            Welcome to BisonGPT, I'm here to assist you with all your Howard
+            University related queries!
           </p>
         </div>
       )}
@@ -167,7 +212,7 @@ export function Playground() {
           {isTyping && (
             <div className="flex justify-start mb-4">
               <div className="bg-gray-200 dark:bg-gray-700 text-black dark:text-white p-4 rounded-2xl max-w-xs md:max-w-md">
-                <p className="text-sm italic">Bot is typing...</p>
+                <p className="text-sm italic">Processing...</p>
               </div>
             </div>
           )}
@@ -176,9 +221,24 @@ export function Playground() {
         </div>
       </div>
 
-      {/* Input Field */}
+      {/* Input and File Upload Section */}
       <div className="border-t border-gray-300 dark:border-gray-700 p-4 bg-white dark:bg-gray-800 sticky bottom-0">
         <div className="flex items-center space-x-2">
+          {/* File Upload */}
+          <input
+            type="file"
+            id="file-upload"
+            className="hidden"
+            onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+          />
+          <label
+            htmlFor="file-upload"
+            className="cursor-pointer bg-gray-200 text-black dark:bg-gray-700 dark:text-white px-4 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 shadow-md"
+          >
+            Attach File
+          </label>
+
+          {/* Message Input */}
           <Input
             autoFocus
             className="flex-1 rounded-full bg-gray-100 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -192,6 +252,8 @@ export function Playground() {
               }
             }}
           />
+
+          {/* Send Button */}
           <Button
             onClick={handleSendMessage}
             type="submit"
@@ -200,6 +262,13 @@ export function Playground() {
             Send
           </Button>
         </div>
+
+        {/* Show Selected File Name */}
+        {selectedFile && (
+          <p className="text-sm text-gray-500 mt-2">
+            Selected file: {selectedFile.name}
+          </p>
+        )}
       </div>
     </div>
   );
