@@ -2,6 +2,9 @@ import chainlit as cl
 from chainlit.config import config
 from openai import AsyncOpenAI, AsyncAssistantEventHandler, OpenAI
 from urllib.parse import quote
+from pathlib import Path
+from typing import List
+from chainlit.element import Element
 
 # Initialize OpenAI clients
 client = OpenAI()
@@ -40,7 +43,7 @@ class EventHandler(AsyncAssistantEventHandler):
                         citations.append(f"[{index + 1}]: {cited_file.filename}")
 
             if citations:
-                self.current_message.content += "\nCitations:\n" + "\n".join(citations)
+                self.current_message.content += "\n\nCitations:\n" + "\n".join(citations)
                 await self.current_message.update()
 
     async def on_event(self, event) -> None:
@@ -85,19 +88,31 @@ class EventHandler(AsyncAssistantEventHandler):
         base_url = "https://www.google.com/maps/dir/?api=1"
         encoded_address = quote(address)
         return f"{base_url}&origin=current+location&destination={encoded_address}"
+    
+async def upload_files(files: List[Element]):
+    file_ids = []
+    for file in files:
+        uploaded_file = await async_client.files.create(
+            file=Path(file.path), purpose="assistants"
+        )
+        file_ids.append(uploaded_file.id)
+    return file_ids
+
+async def process_files(files: List[Element]):
+    file_ids = await upload_files(files) if files else []
+
+    return [
+        {
+            "file_id": file_id,
+            "tools": [{"type": "file_search"}] if file.mime in ["text/markdown", "application/pdf", "text/plain", "application/json"] else [{"type": "code_interpreter"}],
+        }
+        for file_id, file in zip(file_ids, files)
+    ]
 
 @cl.on_chat_start
 async def start_chat():
     thread = await async_client.beta.threads.create()
-    message = await async_client.beta.threads.messages.create(
-        thread_id=thread.id,
-        role="assistant",
-        content="Hello, Welcome to BisonGPT. How may I help you today?"
-    )
-
     cl.user_session.set("thread_id", thread.id)
-
-    await cl.Message(content="Hello, Welcome to BisonGPT. How may I help you today?").send()
 
 @cl.on_stop
 async def stop_chat():
@@ -109,11 +124,19 @@ async def stop_chat():
 async def main(message: cl.Message):
     thread_id = cl.user_session.get("thread_id")
 
+    if message.author == "bot":
+        print(message.content)
+        return
+
+    # Handle message content and optional file attachment
+    attachments = await process_files(message.elements)
+
     # Add a Message to the Thread
     new_message = await async_client.beta.threads.messages.create(
         thread_id=thread_id,
         role="user",
-        content=message.content
+        content=message.content,
+        attachments=attachments,
     )
 
     # Create and Stream a Run
