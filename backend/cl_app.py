@@ -1,3 +1,5 @@
+import csv
+import pdfplumber
 import chainlit as cl
 from chainlit.config import config
 from openai import AsyncOpenAI, AsyncAssistantEventHandler, OpenAI
@@ -5,13 +7,14 @@ from urllib.parse import quote
 from pathlib import Path
 from typing import List
 from chainlit.element import Element
+from openai.types.beta.threads.runs import RunStep
 
 # Initialize OpenAI clients
 client = OpenAI()
 async_client = AsyncOpenAI()
 
 # Retrieve assistant details
-assistant = client.beta.assistants.retrieve(assistant_id="asst_TIwxYMA4iJar5MbFxOs9o3zy")
+assistant = client.beta.assistants.retrieve(assistant_id="asst_yXIkOYQcixMMXVKI5eEU9LD3")
 config.ui.name = assistant.name
 
 class EventHandler(AsyncAssistantEventHandler):
@@ -20,6 +23,9 @@ class EventHandler(AsyncAssistantEventHandler):
         self.current_message: cl.Message = None
         self.current_step: cl.Step = None
         self.assistant_name = assistant_name
+
+    async def on_run_step_created(self, run_step: RunStep) -> None:
+        cl.user_session.set("run_step", run_step)
 
     async def on_text_created(self, text) -> None:
         self.current_message = await cl.Message(author=self.assistant_name, content="").send()
@@ -36,15 +42,11 @@ class EventHandler(AsyncAssistantEventHandler):
             for index, annotation in enumerate(text.annotations):
                 if annotation.type == "file_citation":
                     if annotation.text in self.current_message.content:
-                        self.current_message.content = self.current_message.content.replace(annotation.text, f"[{index + 1}]")
+                        self.current_message.content = self.current_message.content.replace(annotation.text, "")
 
                     if file_citation := getattr(annotation, "file_citation", None):
                         cited_file = await async_client.files.retrieve(file_citation.file_id)
                         citations.append(f"[{index + 1}]: {cited_file.filename}")
-
-            if citations:
-                self.current_message.content += "\n\nCitations:\n" + "\n".join(citations)
-                await self.current_message.update()
 
     async def on_event(self, event) -> None:
         if event.event == "thread.run.requires_action":
@@ -88,26 +90,36 @@ class EventHandler(AsyncAssistantEventHandler):
         base_url = "https://www.google.com/maps/dir/?api=1"
         encoded_address = quote(address)
         return f"{base_url}&origin=current+location&destination={encoded_address}"
-    
-async def upload_files(files: List[Element]):
-    file_ids = []
-    for file in files:
-        uploaded_file = await async_client.files.create(
-            file=Path(file.path), purpose="assistants"
-        )
-        file_ids.append(uploaded_file.id)
-    return file_ids
+
+async def parse_file(file: Element):
+    content = ""
+    file_path = Path(file.path)
+    if file.mime == "text/plain":
+        # Read TXT file
+        with file_path.open("r", encoding="utf-8") as txt_file:
+            content = txt_file.read()
+    elif file.mime == "application/pdf":
+        # Read PDF file
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                content += page.extract_text() + "\n"
+    elif file.mime == "text/csv":
+        # Read CSV file
+        with file_path.open("r", encoding="utf-8") as csv_file:
+            reader = csv.reader(csv_file)
+            content = "\n".join([", ".join(row) for row in reader])
+    else:
+        content = "Unsupported file type"
+
+    return content
 
 async def process_files(files: List[Element]):
-    file_ids = await upload_files(files) if files else []
+    parsed_files = {}
+    for file in files:
+        file_content = await parse_file(file)
+        parsed_files[file.name] = file_content
 
-    return [
-        {
-            "file_id": file_id,
-            "tools": [{"type": "file_search"}] if file.mime in ["text/markdown", "application/pdf", "text/plain", "application/json"] else [{"type": "code_interpreter"}],
-        }
-        for file_id, file in zip(file_ids, files)
-    ]
+    return parsed_files
 
 @cl.on_chat_start
 async def start_chat():
@@ -129,20 +141,29 @@ async def main(message: cl.Message):
         return
 
     # Handle message content and optional file attachment
-    attachments = await process_files(message.elements)
+    attachments = await process_files(message.elements) if message.elements else {}
+
+    file_content = None
+    for _, content in attachments.items():
+        file_content = content
 
     # Add a Message to the Thread
     new_message = await async_client.beta.threads.messages.create(
         thread_id=thread_id,
         role="user",
         content=message.content,
-        attachments=attachments,
-    )
+        )
 
     # Create and Stream a Run
     async with async_client.beta.threads.runs.stream(
         thread_id=thread_id,
         assistant_id=assistant.id,
         event_handler=EventHandler(assistant_name=assistant.name),
+        additional_messages=[
+            {
+                "role": "user",
+                "content": file_content
+            }
+        ]
     ) as stream:
         await stream.until_done()

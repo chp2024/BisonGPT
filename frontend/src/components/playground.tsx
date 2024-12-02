@@ -111,7 +111,19 @@ export function Playground() {
               : "bg-gray-200 text-black rounded-bl-none dark:bg-gray-700 dark:text-white"
           }`}
         >
-          <ReactMarkdown className="text-sm whitespace-pre-wrap">
+          <ReactMarkdown
+            components={{
+              a: ({ href, children }) => (
+                <a
+                  href={href}
+                  style={{ color: "red", textDecoration: "underline" }}
+                >
+                  {children}
+                </a>
+              ),
+            }}
+            className="text-sm whitespace-pre-wrap"
+          >
             {message.output}
           </ReactMarkdown>
           <small className="text-xs text-gray-400 block mt-1">{date}</small>

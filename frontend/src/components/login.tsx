@@ -12,7 +12,7 @@ export function Login({ onLogin }: LoginProps) {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     // Basic validation
-    if (username === "admin" && password === "password") {
+    if (username === "ryan.taylor" && password === "password") {
       onLogin(); // Call the callback to update authentication state
     } else {
       setError("Invalid username or password");
@@ -30,7 +30,9 @@ export function Login({ onLogin }: LoginProps) {
             <div className="text-red-500 text-center text-sm">{error}</div>
           )}
           <div>
-            <label className="block text-gray-700 dark:text-gray-300">Username</label>
+            <label className="block text-gray-700 dark:text-gray-300">
+              Username
+            </label>
             <input
               type="text"
               className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
@@ -40,7 +42,9 @@ export function Login({ onLogin }: LoginProps) {
             />
           </div>
           <div>
-            <label className="block text-gray-700 dark:text-gray-300">Password</label>
+            <label className="block text-gray-700 dark:text-gray-300">
+              Password
+            </label>
             <input
               type="password"
               className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
